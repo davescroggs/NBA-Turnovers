@@ -1,0 +1,243 @@
+---
+title: "Call centres, horse kicks and NBA turnovers - Randomness in the everyday life"
+author: "David Scroggs"
+date: "17/05/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(tidyverse)
+```
+
+This is my first foray into internet blogging .
+
+This post was inspired by a conversation I had on twitter with a sport scientist who works with the Aussie Diamonds netball team. We were discussing turnovers in netball and what happens with turnovers between goals. The underlying distribution of the number of turnovers between goals looked approximately poisson. So I wondered whether this behaviour had other characteristics of an interesting phenomena called "Poisson Process". Without getting into too much of the technical detail, poisson processes occur when you have sitution where there are a large number of trials with a small success rate. This behaviour can be found in the decay of radioactive elements, people contacting call centres, and even horse kicks killing prussian soliders in
+
+## Introduction
+
+I managed to find a dataset on the internet for the 2016/17 NBA regular season that had play-by-play data that recorded a few different events throughout the game, and the time it happens. I've extacted the 34,424 tunrovers from all 1,230 games, this is what I found.
+
+```{r}
+NBA_PBP <- readRDS("NBA_PBP.rds")
+
+TO_Types = c("Traveling","Foul","Bad Pass","Out of Bounds - Bad Pass","Discontinue Dribble","Poss Lost Ball","Step Out of Bounds","Offensive Goaltending","Lost Ball","Double Personal","Kicked Ball Violation","Basket from Below","Jump Ball Violation","5 Second Violation","3 Second Violation","Illegal Assist","Lane Violation","Illegal Screen","Out of Bounds Lost Ball","Palming","Double Dribble","Backcourt","Shot Clock","8 Second Violation","5 Second Inbound")
+
+NBA_TO_FILTERED <- NBA_PBP %>%
+  select(PCTIMESTRING,PERIOD,GAME_ID,HOMEDESCRIPTION,VISITORDESCRIPTION,PLAYER1_TEAM_NICKNAME,PLAYER2_TEAM_NICKNAME,SCOREMARGIN) %>%
+  mutate(Mins = str_extract(PCTIMESTRING,regex("\\d+(?=\\:)")),
+            Secs = str_extract(PCTIMESTRING,regex("(?<=\\:)\\d+")),
+            Mins = as.integer(Mins),Secs = as.integer(Secs),
+         Game_Time = PERIOD*720 - (Mins * 60 + Secs),
+         SCOREMARGIN = as.integer(if_else(SCOREMARGIN == "TIE","0",SCOREMARGIN))) %>%
+  fill(SCOREMARGIN,.direction ="downup") %>% 
+  filter(str_detect(HOMEDESCRIPTION,regex('turnover', ignore_case = T)) | 
+           str_detect(VISITORDESCRIPTION,regex('turnover', ignore_case = T))) %>%
+  arrange(GAME_ID,PERIOD,Game_Time) %>%
+  mutate(Time_Diff = lead(Game_Time) - Game_Time,
+         Time_Diff = if_else(Time_Diff < 0,NA_real_,Time_Diff))
+```
+
+Here are the different types of turnovers recorded in the description of the event in the data set. 85% of all turnovers are bad passes, lost balls or fouls. There are a few exotic turnoves in the set, a punched ball turnover and one for too many players on the court.
+
+```{r}
+TO_Counts <- NBA_TO_FILTERED %>% select(HOMEDESCRIPTION,VISITORDESCRIPTION) %>% 
+  gather(A,B,c(HOMEDESCRIPTION,VISITORDESCRIPTION)) %>% 
+  filter(!is.na(B),str_detect(B,regex('turnover', ignore_case = T))) %>%
+  mutate(TO_Type = case_when(
+    str_detect(B, regex('Traveling', ignore_case = T)) ~ 'Traveling',
+    str_detect(B, regex('Foul', ignore_case = T)) ~ 'Foul',
+    str_detect(B, regex('Bad Pass', ignore_case = T)) ~ 'Bad Pass',
+    str_detect(B, regex('Out of Bounds - Bad Pass', ignore_case = T)) ~ 'Out of Bounds - Bad Pass',
+    str_detect(B, regex('Discontinue Dribble', ignore_case = T)) ~ 'Discontinue Dribble',
+    str_detect(B, regex('Step Out of Bounds', ignore_case = T)) ~ 'Step Out of Bounds',
+    str_detect(B, regex('Offensive Goaltending', ignore_case = T)) ~ 'Offensive Goaltending',
+    str_detect(B, regex('Lost Ball', ignore_case = T)) ~ 'Lost Ball',
+    str_detect(B, regex('Double Personal', ignore_case = T)) ~ 'Double Personal',
+    str_detect(B, regex('Kicked Ball Violation', ignore_case = T)) ~ 'Kicked Ball Violation',
+    str_detect(B, regex('Basket from Below', ignore_case = T)) ~ 'Basket from Below',
+    str_detect(B, regex('Jump Ball Violation', ignore_case = T)) ~ 'Jump Ball Violation',
+    str_detect(B, regex('5 Second Violation', ignore_case = T)) ~ '5 Second Violation',
+    str_detect(B, regex('3 Second Violation', ignore_case = T)) ~ '3 Second Violation',
+    str_detect(B, regex('Illegal Assist', ignore_case = T)) ~ 'Illegal Assist',
+    str_detect(B, regex('Lane Violation', ignore_case = T)) ~ 'Lane Violation',
+    str_detect(B, regex('Illegal Screen', ignore_case = T)) ~ 'Illegal Screen',
+    str_detect(B, regex('Out of Bounds Lost Ball', ignore_case = T)) ~ 'Out of Bounds Lost Ball',
+    str_detect(B, regex('Palming', ignore_case = T)) ~ 'Palming',
+    str_detect(B, regex('Double Dribble', ignore_case = T)) ~ 'Double Dribble',
+    str_detect(B, regex('Backcourt', ignore_case = T)) ~ 'Backcourt',
+    str_detect(B, regex('Shot Clock', ignore_case = T)) ~ 'Shot Clock',
+    str_detect(B, regex('8 Second Violation', ignore_case = T)) ~ '8 Second Violation',
+    str_detect(B, regex('5 Second Inbound', ignore_case = T)) ~ '5 Second Inbound',
+    str_detect(B, regex('Inbound Turnover', ignore_case = T)) ~ 'Inbound Turnover',
+    str_detect(B, regex('Out Of Bounds Turnover', ignore_case = T)) ~ 'Out Of Bounds Turnover',
+    str_detect(B, regex('Too Many Players', ignore_case = T)) ~ 'Too Many Players',
+    str_detect(B, regex('Punch', ignore_case = T)) ~ 'Punched Ball Turnover',
+    TRUE ~ "Other"
+  ))
+
+TO_Counts %>% count(TO_Type,sort = TRUE) %>%
+  ggplot() + 
+  geom_col(aes(x = fct_reorder(TO_Type,n),y = n),fill = "Dodgerblue") +
+  coord_flip() +
+  labs(y = "Number of Turnovers",
+       x = "",
+       title = "Turnover Types in the NBA 2016/17 Season")
+```
+
+## Characteristics of the Poisson Process
+
+
+
+## Assumptions
+
+Firstly, some assumptions I have made, rightly or wrongly.
+ - When looking at the time between turnovers, the last turnover of 
+ - Turnovers were considered in 
+ - Turnovers were looked at over the whole league, regardless of team or home/away. This allowed for more data points to be analysed. So for any of the below analysis, unless otherwise stated, the numbers are for both teams.
+ - Mostly, where shown, I only looked only at regulation time (quarters 1-4).
+This was something that I looked at very superficially.
+
+## Turnover counts in quarters
+
+Below is a figure that shows the number of turnovers recorded for a given quarter and game. The daashed line shows the average number of number of turnovers per quarter, per game. The distribution certainly looks like it could be poisson.
+
+
+```{r}
+Mean_TOs <- NBA_TO_FILTERED %>%
+   filter(PERIOD < 5) %>%
+  group_by(GAME_ID,PERIOD) %>%
+  summarise(n = n()) %>% ungroup() %>% 
+  group_by(PERIOD) %>% summarise(mean = mean(n),nn = n())
+
+NBA_TO_FILTERED %>%
+  filter(PERIOD < 5) %>% 
+  group_by(GAME_ID,PERIOD) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(n)) +
+  geom_bar(aes(fill = factor(PERIOD)),col = "black",alpha = 0.3) +
+  geom_vline(data = Mean_TOs,aes(xintercept = mean),linetype = "dashed") +
+  labs(title = "Turnovers per quarter",
+       subtitle = "Either team",
+    x = "Total Turnovers in a quarter", y = "Counts", fill = "Period",
+    caption = "NBA 2016/17 season") +
+  facet_wrap(~paste("Qtr:",PERIOD)) +
+  guides(color = FALSE)
+```
+
+
+
+## Theoretical vs. Actual
+
+There are some convenient properties of the poisson distribution, one being that the distribution is dependent on the average arrival rate. The average or mean arrival rate is the total number of seconds in a quarter divided by the mean number of turnovers per quarter. This rate can then be used to produce a theoretical distribution, which can be used to test the "fit" of the assumption that the turnovers are occurring as poisson random variables. The plot below compares the "density" of the actual turnovers with the theoretical distribution of the turnovers based on the mean rate calculated from the data set. As can be seen the two match fairly closely, with the black line showing the theoretical distribution and the coloured area showing the actual distribution.
+
+```{r}
+POI_THEOR <- NBA_TO_FILTERED %>%
+  filter(PERIOD < 5) %>% 
+  group_by(GAME_ID,PERIOD) %>% summarise(n = n()) %>%
+  ungroup() %>% group_by(PERIOD) %>% summarise(mean = mean(n)) %>% 
+  right_join(tibble(n = rep(1:25,4),PERIOD = rep(1:4,each = 25)),by = "PERIOD") %>%
+  mutate(Theor_Density = dpois(n,mean)) %>% 
+  arrange(PERIOD,n)
+
+NBA_TO_FILTERED %>%
+  filter(PERIOD < 5) %>%
+  group_by(GAME_ID,PERIOD) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(n)) +
+  geom_density(aes(fill = factor(PERIOD),colour = factor(PERIOD)),position = "identity",alpha = 0.3) +
+  geom_line(data = POI_THEOR,aes(x = n, y =Theor_Density),col = "black",position = "identity",guide = FALSE) +
+  labs(title = "Turnovers per quarter, count density",
+       subtitle = "Theoretical vs. actual",
+    x = "Total Turnovers in a quarter", y = "Counts", fill = "Period",
+    caption = "NBA 2016/17 season.  Line is theoretical, fill is actual") +
+  facet_wrap(~paste("Qtr:",PERIOD)) +
+  guides(color = FALSE)
+```
+
+## Theorgetical vs. Acutal
+
+Another characteristic of the poisson process is that the time between events (turnovers) is exponentially distributed. Again, another convenient characteristic is that the related exponential distribution is dependent on the mean arrival rate of the turnovers. So we can check the assumption of the poisson process by looking at the time between events. The figure below shows the acrtual distribution of the time between turnovers in blue, with the theoretical distribution plotted as the yellow line. The rate as 
+
+```{r}
+
+TO_Mean_All = 1/mean(filter(NBA_TO_FILTERED,PERIOD < 5)$Time_Diff,na.rm = TRUE)
+TO_Max_All = max(filter(NBA_TO_FILTERED,PERIOD < 5)$Time_Diff,na.rm = TRUE)
+
+Time_Diff.curve = tibble(
+  A = seq(0,TO_Max_All,5), B = TO_Mean_All*exp(-TO_Mean_All*A))
+
+NBA_TO_FILTERED %>%
+  filter(PERIOD < 5) %>%
+  ggplot() +
+  geom_histogram(aes(x = Time_Diff,y = ..density..),col = "black",fill = "dodgerblue",binwidth = 15,na.rm = TRUE) +
+  geom_line(data = Time_Diff.curve,aes(A,B),col = "gold",size = 1) +
+  labs(title = "Time between turnovers, either team, 48 NBA minute game",
+       subtitle = "Theoretical (Gold) vs. Actual (Blue)",
+    x = "Time Difference (seconds)", y = "Density",
+    caption = "NBA 2016/17 season") +
+  scale_x_continuous(breaks = seq(0,1500,250)) +
+  annotate("label", x = 1000,y = 0.0075,label = paste("Turnover rate =", round(TO_Mean_All^-1,0)," seconds per TO"))
+```
+
+The 
+
+## Timing of turnovers
+
+Finally, 
+
+```{r}
+NBA_TO_FILTERED %>%
+  filter(PERIOD < 5) %>% 
+  ggplot(aes(x = Game_Time/60)) +
+  geom_histogram(aes(fill = factor(PERIOD)),col = "black",breaks = seq(0,48,0.5),na.rm = TRUE) +
+  scale_x_continuous(breaks = seq(0,48,4)) +
+  labs(title = "Number of turnovers across a game",
+       subtitle = "Either team, 30 second blocks",
+    x = "Game Time (minutes)", y = "Number of turnovers", fill = "Period",
+    caption = "NBA 2016/17 season")
+```
+
+## Other cool things
+
+I looked at other interesting turnover behaviour, but I won't go into any detail about them. I'll leave them up to interpretation.
+
+Departures from the general behaviour
+ - Turnover behaviour at the end of games
+ 
+```{r}
+NBA_TO_FILTERED %>%
+  gather(HOMEAWAY,Description,c(HOMEDESCRIPTION,VISITORDESCRIPTION)) %>% 
+  filter(str_detect(Description,regex('turnover', ignore_case = T)),
+         PERIOD == 4,Mins == 0,Secs <= 24) %>%
+  mutate(SCOREMARGIN = if_else(HOMEAWAY == "VISITORDESCRIPTION",-SCOREMARGIN,SCOREMARGIN),
+         End_Game = case_when(
+    Secs < 8 ~ "Last 8",
+    Secs < 16 ~ "8-15 secs",
+    Secs <= 24 ~ "16-24 secs"
+    ),
+    TO_Type = case_when(
+    str_detect(Description, regex('Traveling', ignore_case = T)) ~ 'Traveling',
+    str_detect(Description, regex('Foul', ignore_case = T)) ~ 'Foul',
+    str_detect(Description, regex('Bad Pass', ignore_case = T)) ~ 'Bad Pass',
+    str_detect(Description, regex('Lost Ball', ignore_case = T)) ~ 'Lost Ball',
+    str_detect(Description, regex('Shot Clock', ignore_case = T)) ~ 'Shot Clock',
+    TRUE ~ "Other"
+  )) %>%
+  ggplot(aes(x = SCOREMARGIN)) +
+  geom_histogram(aes(fill = TO_Type),col = "black",na.rm = TRUE,
+                 breaks = seq(-40,40,1),alpha = 0.4) +
+  scale_x_continuous(breaks = seq(-40,40,5)) +
+  labs(title = "Number of turnovers at the end of games",
+       subtitle = "Either team, 4th Qtr, last 24 seconds",
+    x = "Score Margin", y = "Number of turnovers",
+    caption = "NBA 2016/17 season")+
+  geom_vline(aes(xintercept = 0),size = 1.2)+
+  facet_grid(End_Game~.)
+```
+ 
+ 
